@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Sample</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+      }
+      html,body {
+        height: 100%;
+        background-color: #eee;
+      }
+      canvas {
+        background-color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" width="512" height="512"></canvas>
+    <canvas id="texture" width="512" height="512" style="display: none;"></canvas>
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+    <script>
+      $(function () {
+
+          var WIDTH = 512;
+          var HEIGHT = 512;
+
+          // マウス座標
+          var mouseX = 0.5;
+          var mouseY = 0.5;
+          var moveX = 0.5;
+          var moveY = 0.5;
+
+          // テクスチャ用CANVAS
+          var textureCanvas = document.getElementById('texture');
+          textureCanvas.width = WIDTH;
+          textureCanvas.height = HEIGHT;
+          var textureContext = textureCanvas.getContext('2d');
+          textureContext.fillStyle = '#ffffff';
+          textureContext.fillRect(0, 0, WIDTH, HEIGHT);
+
+          // GLSL描画用CANVAS
+          var webglCanvas = document.getElementById('canvas');
+          webglCanvas.width = WIDTH;
+          webglCanvas.height = HEIGHT;
+          var webglContext = webglCanvas.getContext('webgl', {preserveDrawingBuffer: true});
+          webglContext.viewport(0, 0, WIDTH, HEIGHT);
+
+          // プログラムの取得
+          var program = webglContext.createProgram();
+
+          // テクスチャ読み込み
+          loadTexture('./texture.png', function(texture){
+              textureContext.drawImage(texture, 0, 0, WIDTH, HEIGHT);
+
+              // フラグメントシェーダ読み込み
+              loadFragmentShader('./fragment.glsl', function(shader){
+
+                  // フラグメントシェーダ設定
+                  var fragmentShader = webglContext.createShader(webglContext.FRAGMENT_SHADER);
+                  webglContext.shaderSource(fragmentShader, shader);
+                  webglContext.compileShader(fragmentShader);
+                  webglContext.attachShader(program, fragmentShader);
+
+                  // バーテックスシェーダ読み込み
+                  loadVertexShader('./vertex.glsl', function(shader){
+
+                      // バーテックスシェーダ設定
+                      var vertexShader = webglContext.createShader(webglContext.VERTEX_SHADER);
+                      webglContext.shaderSource(vertexShader, shader);
+                      webglContext.compileShader(vertexShader);
+                      webglContext.attachShader(program, vertexShader);
+
+                      // シェーダをリンク
+                      webglContext.linkProgram(program);
+
+                      // プログラムオブジェクトの有効化
+                      webglContext.useProgram(program);
+
+                      // 頂点データ
+                      var vertices = new Float32Array([-1, -1, 0, -1, 1, 0, 1, -1, 0, 1, 1, 0]);
+                      var verticesBuff = webglContext.createBuffer();
+                      webglContext.bindBuffer(webglContext.ARRAY_BUFFER, verticesBuff);
+                      webglContext.bufferData(webglContext.ARRAY_BUFFER, vertices, webglContext.STATIC_DRAW);
+                      var vertexAttr = webglContext.getAttribLocation(program, 'vertex');
+                      webglContext.enableVertexAttribArray(vertexAttr);
+                      webglContext.vertexAttribPointer(vertexAttr, 3, webglContext.FLOAT, false, 0, 0);
+
+                      // テクスチャデータ
+                      var texture = webglContext.createTexture();
+                      webglContext.bindTexture(webglContext.TEXTURE_2D, texture);
+                      webglContext.texImage2D(webglContext.TEXTURE_2D, 0, webglContext.RGBA, webglContext.RGBA, webglContext.UNSIGNED_BYTE, textureCanvas);
+                      webglContext.generateMipmap(webglContext.TEXTURE_2D);
+
+                      // テクスチャ座標
+                      var coord = new Float32Array([0,1, 0,0, 1,1, 1,0]);
+                      var coordBuff = webglContext.createBuffer();
+                      webglContext.bindBuffer(webglContext.ARRAY_BUFFER, coordBuff);
+                      webglContext.bufferData(webglContext.ARRAY_BUFFER, coord, webglContext.STATIC_DRAW);
+                      var coordAttr = webglContext.getAttribLocation(program, 'coord');
+                      webglContext.enableVertexAttribArray(coordAttr);
+                      webglContext.vertexAttribPointer(coordAttr, 2, webglContext.FLOAT, false, 0, 0);
+
+                      // マウス座標
+                      $('#canvas').on('mouseenter', function(e) {
+                        $('#canvas').on('mousemove', onMouseMove);
+                      });
+                      $('#canvas').on('mouseleave', function(e) {
+                        $('#canvas').off('mousemove', onMouseMove);
+                          mouseX = 0.5;
+                          mouseY = 0.5;
+                      });
+                      function onMouseMove(e) {
+                          mouseX = e.clientX / WIDTH;
+                          mouseY = e.clientY / HEIGHT;
+                      }
+
+                      // レンダリング
+                      render();
+
+                      // レンダリング
+                      function render() {
+                          uniform = {};
+
+                          // マウス座標のイージング
+                          moveX += (mouseX - moveX) * 0.1;
+                          moveY += (mouseY - moveY) * 0.1;
+
+                          // uniform変数mouseのロケーション取得
+                          uniform.mouse = webglContext.getUniformLocation(program, 'mouse');
+
+                          // uniform変数をプッシュ
+                          webglContext.uniform2fv(uniform.mouse, [moveX, moveY]);
+
+                          // 描画
+                          webglContext.drawArrays(webglContext.TRIANGLE_STRIP, 0, 4);
+                          webglContext.flush();
+                          webglContext.finish();
+
+                          // 再起
+                          requestAnimationFrame(render);
+                      }
+
+                  });
+              });
+
+          });
+
+          // テクスチャ読み込み
+          function loadTexture(src, cb) {
+              var image = new Image();
+              image.onload = function () {
+                  cb(image);
+              };
+              image.src = src;
+          }
+
+          // フラグメントシェーダ読み込み
+          function loadFragmentShader(src, cb) {
+              $.ajax(src, {
+                  type: 'get',
+                  dataType: 'text'
+              }).done(function(data){
+                  cb(data);
+              });
+          }
+
+          // バーテックスシェーダ読み込み
+          function loadVertexShader(src, cb) {
+              $.ajax(src, {
+                  type: 'get',
+                  dataType: 'text'
+              }).done(function(data){
+                  cb(data);
+              });
+          }
+
+        });
+    </script>
+  </body>
+</html>
